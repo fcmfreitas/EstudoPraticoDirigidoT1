@@ -19,10 +19,14 @@ import (
 
 const NJ = 5           // numero de jogadores
 const M = 4            // numero de cartas
+var bateu = false;
+var sequenciaBater []int 
 
 type carta string      // carta é um string
 
-var ch [NJ]chan carta  // NJ canais de itens tipo carta  
+var turno = make(chan int, 1)
+var mesa = make(chan carta, 1)
+var dorminhoco = make(chan struct{}) //sinaliza o fim do jogo
 
 func embaralhaCartas() [5][5]carta {
 	// Cria o baralho com 21 cartas (4 de cada letra e uma carta extra)
@@ -32,14 +36,13 @@ func embaralhaCartas() [5][5]carta {
 		"Q", "Q", "Q", "Q",
 		"K", "K", "K", "K",
 		"A", "A", "A", "A",
-		"@", // carta coringa
+		"@", 
 	}
 
 	// Embaralha o baralho
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(baralho), func(i, j int) { baralho[i], baralho[j] = baralho[j], baralho[i] })
 
-	// Cria a matriz 5x5
 	var matriz [5][5]carta
 
 	// Preenche a matriz com as cartas embaralhadas
@@ -77,7 +80,7 @@ func imprimirMatriz(matriz [5][5]carta) {
 	}
 }
 
-func encontrarCartaMaisDiferente(mao []carta) carta {
+func encontrarMaisDiferente(mao []carta) carta {
 	
 	frequencias := make(map[carta]int)
 	
@@ -98,35 +101,77 @@ func encontrarCartaMaisDiferente(mao []carta) carta {
 	return cartaMenosFrequente
 }
 
-func jogador(id int, mesa chan carta, cartasIniciais []carta ) {
+func cartasIguais(mao []carta) bool {
 
-	mao := cartasIniciais    // estado local - as cartas na mao do jogador
+	primeiraCarta := mao[0]
+	for _, c := range mao {
+		if c != primeiraCarta {
+			return false
+		}
+	}
+	return true
+}
+
+func printMao(id int, mao []carta) {
+	fmt.Printf("Mão do Jogador %d: ", id)
+	for _, c := range mao {
+		fmt.Print(c, " ")
+	}
+	fmt.Println()
+}
+
+func jogador(id int, cartasIniciais []carta) {
+
+	mao := cartasIniciais    // mão do jogador
 
 	for {
-		if len(mao) == 5{
-			
-			fmt.Println(id, " joga") // escreve seu identificador
-			
-			cartaDescartada := encontrarCartaMaisDiferente(mao) //seleciona a melhor carta para passar
-			mesa <- cartaDescartada
-			mao = removerCarta(mao, cartaDescartada)
-			
-			fmt.Printf("Jogador %d descartou: %v\n", id, cartaDescartada)
+		turnoAtual := <- turno
 
-		} else {  
-		
-			mao = append(mao, <-mesa)
-			// recebe carta da mesa
-			//  ...
-			// e se alguem bate ?
+		if bateu {
+			sequenciaBater = append(sequenciaBater, id)
+			if len(sequenciaBater) == NJ {dorminhoco <- struct{}{}}
+			return
 		}
+		
+		if turnoAtual == id{
+
+			if len(mao) != NJ {
+				mao = append(mao, <-mesa)
+			}  
+			
+			fmt.Println(id, " jogando...") 
+				
+				cartaDescartada := encontrarMaisDiferente(mao) //seleciona a melhor carta para passar
+				for i, c := range mao {
+					if c == cartaDescartada {
+						mao = append(mao[:i], mao[i+1:]...)
+						break
+					}
+				}
+				mesa <- cartaDescartada
+				
+				printMao(id, mao)
+				fmt.Printf("Jogador %d descartou: %v\n\n", id, cartaDescartada)
+
+				if cartasIguais(mao) {
+					fmt.Println("BATEU!")
+					sequenciaBater = append(sequenciaBater, id)
+					bateu = true;
+					close(turno)
+					return
+				}
+	
+				turnoAtual = (id + 1) % NJ
+				
+		}
+		turno <- turnoAtual
 	}
 }
 
 func main() {
 	
 	matriz := embaralhaCartas() // cria baralho e embaralha
-	canalMesa := make(chan carta, 1) // cria o canal em que será passada a carta
+	turno <- 0
 
 	// distribui as cartas e cria os jogadores
 	for i := 0; i < NJ; i++ {
@@ -142,11 +187,13 @@ func main() {
 			}
 		}
 
-		go jogador(i, canalMesa, cartasIniciais)
+		go jogador(i, cartasIniciais)
 	}
 
 	// Mantém o programa rodando
-	<-make(chan struct{}) // Bloqueia
+	<-dorminhoco // Bloqueia
+	fmt.Printf("\nSequencia de batida: %d, %d, %d, %d, %d\n", sequenciaBater[0], sequenciaBater[1], sequenciaBater[2], sequenciaBater[3], sequenciaBater[4])
+	fmt.Printf("Jogador %d levou ROLHADA!", sequenciaBater[4])
 	
 }
 
